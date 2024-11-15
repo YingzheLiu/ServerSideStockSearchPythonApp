@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <link href="{{ url_for('static', filename='index.css') }}" rel="stylesheet" type="text/css">
+    <title>CSCI571 HW6 - Yingzhe Liu</title>
+
+    <script src="https://code.highcharts.com/stock/highstock.js"></script>
+    <script src="https://code.highcharts.com/stock/modules/data.js"></script>
+    <script src="https://code.highcharts.com/stock/modules/exporting.js"></script>
+    <script src="https://code.highcharts.com/stock/modules/export-data.js"></script>
+
+    <script>
+      const CLOUDSERVERURL= 'http://serversidestocksearchpythonapp-env-2.eba-r3qmw4di.us-west-1.elasticbeanstalk.com/'
+      // const CLOUDSERVERURL = 'http://localhost:8080/'
+
+      function isObjEmpty(obj) {
+        let empty = true;
+        for (const key in obj) {
+          empty = false;
+          break;
+        }
+        return empty;
+      } 
+      function clearNoRecordError() {
+        errorElem = document.getElementById("error");
+        if (errorElem) {
+          errorElem.innerHTML = '';
+        }
+      }
+      function clearContent() {
+        document.getElementById("tab").hidden = true;
+        document.getElementById("Company").innerHTML = '';
+        document.getElementById("StockSummary").innerHTML = '';
+        document.getElementById("chart-container").innerHTML = '';
+        document.getElementById("LatestNews").innerHTML = '';
+        clearNoRecordError();
+      }
+      function displayNoRecordError() {
+        clearContent();
+        document.getElementById('error').innerHTML += '<div id="error-content"><h4>Error: No record has been found, please enter a valid symbol</h4></div>';
+      }
+      function fetchResults() {
+        event.preventDefault();
+        let controller, url, div, img, table;
+        let company = {}, stock = {}, recommendations = [], stockCandles = {}, companyNews = [];
+        let stockPriceData = [], volumeData = [];
+
+        document.getElementById("Company").innerHTML = '';
+        document.getElementById("StockSummary").innerHTML = '';
+        document.getElementById("chart-container").innerHTML = '';
+        document.getElementById("LatestNews").innerHTML = '';  
+        clearNoRecordError();
+        var ticker = document.getElementById('ticker').value.toUpperCase();
+        controller = new AbortController();
+        const signal = controller.signal;
+
+        // ---------------------------
+        // FETCH COMPANY
+        // ---------------------------
+        url = CLOUDSERVERURL + 'company?' + new URLSearchParams({ticker})
+        fetch(url, { signal })
+          .then(response => {
+            return response.json()
+          })
+          .then(data => {
+            if (isObjEmpty(data)) {
+              controller.abort();
+              console.log('fetch aborted');
+              displayNoRecordError()
+            }
+            else {
+              company = data; 
+            
+              document.getElementById("tab").hidden = false; // Show the tab
+            
+              let companyElem = document.getElementById('Company')
+            
+              // Add Company Logo at the top
+              div = document.createElement('div');
+              div.setAttribute('class', 'logo');
+              img = document.createElement('img');
+              img.src = company.logo
+              img.alt = 'Company Logo'
+              div.appendChild(img);
+              companyElem.appendChild(div);
+
+              // Add a table w/ info (Company Name, Stock Ticker Symbol, Stock Exchange Code, Company Start Date, Category) 
+              div = document.createElement('div');
+              div.innerHTML = '<table><tr><th>Company Name</th><td>' + company.name + '</td></tr>'
+                + '<tr><th>Stock Ticker Symbol</th><td>' + company.ticker + '</td></tr>'
+                + '<tr><th>Stock Exchange Code</th><td>' + company.exchange + '</td></tr>'
+                + '<tr><th>Company IPO Date</th><td>' + company.ipo + '</td></tr>'
+                + '<tr><th>Category</th><td>' + company.finnhubIndustry + '</td></tr></table>'
+              companyElem.appendChild(div);
+
+              // ---------------------------
+              // FETCH STOCK SUMMARY
+              // ---------------------------
+              url = CLOUDSERVERURL + 'stock?' + new URLSearchParams({ticker})
+              fetch(url, { signal })
+                .then(response => {
+                  return response.json()
+                }).then(data => {
+                  stock = data;
+
+                  // ---------------------------
+                  // FETCH RECOMMENDATION
+                  // ---------------------------
+                  url = CLOUDSERVERURL + 'recommendation?' + new URLSearchParams({ticker})
+                  fetch(url, { signal })
+                    .then(response => {
+                      return response.json()
+                    }).then(data => {
+                      recommendations = data
+
+                      let stockElem = document.getElementById('StockSummary');
+                  
+                      // Convert UNIX timestamp to formatted date for chart title display
+                      let tradingDay = new Date(stock.t*1000);
+                      let options = { month: 'long'};
+                      tradingDay = tradingDay.getDate() + ' ' + Intl.DateTimeFormat('en-US', options).format(tradingDay) + ', ' + tradingDay.getFullYear();
+
+                      // Add a table w/ info (Stock Ticker Symbol, Trading Day, Previous Closing Price, Opening Price, High Price, Low Price, Change, Change Percent) 
+                      let table = document.createElement('table');
+                      table.innerHTML = '<tr><th>Stock Ticker Symbol</th><td>' + company.ticker + '</td></tr>'
+                        + '<tr><th>Trading Day</th><td>' + tradingDay + '</td></tr>'
+                        + '<tr><th>Previous Closing Price</th><td>' + stock.pc + '</td></tr>'
+                        + '<tr><th>Opening Price</th><td>' + stock.o + '</td></tr>'
+                        + '<tr><th>High Price</th><td>' + stock.h + '</td></tr>'
+                        + '<tr><th>Low Price</th><td>' + stock.l + '</td></tr>'
+                        + '<tr><th>Change</th><td>' + stock.d  
+                        + (stock.d > 0 ? 
+                          "<img src='{{ url_for('static', filename='img/GreenArrowUp.png') }}' alt='Green Arrow Up' height=15 width=15>" 
+                          : "<img src='{{ url_for('static', filename='img/RedArrowDown.png') }}' alt='Red Arrow Down' height=15 width=15>")
+                        + '</td></tr>'
+                        + '<tr><th>Change Percent</th><td>' + stock.dp 
+                        + (stock.dp > 0 ? 
+                          "<img src='{{ url_for('static', filename='img/GreenArrowUp.png') }}' alt='Green Arrow Up' height=15 width=15>" 
+                          : "<img src='{{ url_for('static', filename='img/RedArrowDown.png') }}' alt='Red Arrow Down' height=15 width=15>")
+                        + '</td></tr>'
+                      stockElem.prepend(table);
+
+                      if (recommendations.length > 0) {
+
+                        // Building the indicator w/ the latest date recommendation values
+                        div = document.createElement('div');
+                        div.setAttribute('class', 'indicator');
+                        div.innerHTML = '<h6 id=textStrongSell>Strong Sell</h6>'
+                          + '<h6 id=strongSell>' + recommendations[0].strongSell + '</h6>'
+                          + '<h6 id=sell>' + recommendations[0].sell + '</h6>'
+                          + '<h6 id=hold>' + recommendations[0].hold + '</h6>'
+                          + '<h6 id=buy>' + recommendations[0].buy + '</h6>'
+                          + '<h6 id=strongBuy>' + recommendations[0].strongBuy + '</h6>'
+                          + '<h6 id=textStrongBuy>Strong Buy</h6>'
+                        stockElem.appendChild(div);
+
+                        // Add the indicator title
+                        div = document.createElement('div');
+                        div.setAttribute('class', 'indicator-title');
+                        div.innerHTML = '<h6>Recommendation Trends</h6>'
+
+                        stockElem.appendChild(div);
+                      }
+                    })
+                    .catch(error => {
+                      console.log('Error: ' + error.message);
+                    })
+                })
+                .catch(error => {
+                  console.log('Error: ' + error.message);
+                })
+
+              // ---------------------------
+              // FETCH STOCK CANDLES
+              // ---------------------------
+              url = CLOUDSERVERURL + 'stockcandles?' + new URLSearchParams({ticker})
+              fetch(url, { signal })
+                .then(response => {
+                  return response.json()
+                }).then(data => {
+                  stockCandles = data;
+
+                  // Mapping the Stock prick data to data for HighCharts. 
+                  // (x1, y1): x1 is date and y1 is the corresponding close stock price for that day
+                  stockPriceData = stockCandles.c.map((stockPrice, i) => {
+                    return [stockCandles.t[i] * 1000, stockPrice]
+                  });
+                  // Mapping the Stock prick data to data for HighCharts. 
+                  // (x2, y2): x2 is date and y2 is the volume for that day
+                  volumeData = stockCandles.v.map((volume, i) => {
+                    return [stockCandles.t[i] * 1000, volume]
+                  });
+                  
+                  // Convert UNIX timestamp to formatted date for chart title display
+                  var from = new Date(stockCandles.t[0]*1000);
+                  from = from.getFullYear()+'-'+(from.getMonth()+1)+'-'+from.getDate();
+
+                  showCharts(stockPriceData, volumeData, ticker, from)
+                })
+                .catch(error => {
+                  console.log('Error: ' + error.message);
+                })
+
+              // ---------------------------
+              // FETCH COMPANY NEWS
+              // ---------------------------
+              url = CLOUDSERVERURL + 'companynews?' + new URLSearchParams({ticker})
+              fetch(url, { signal })
+                .then(response => {
+                  return response.json()
+                }).then(data => {
+                  companyNews = data
+                  newsElem = document.getElementById('LatestNews');
+
+                  // L
+                  let newsNum = 0;
+                  for (let i = 0; i < companyNews.length; i++) {
+                    if (companyNews[i].datetime && companyNews[i].image.length !== 0 && companyNews[i].headline.length !== 0 && companyNews[i].url.length !== 0) {
+                      let outerdiv = document.createElement('div');
+                      outerdiv.setAttribute('class', 'news');
+                      
+                      // Add the news image
+                      div = document.createElement('div');
+                      div.setAttribute('class', 'news-img');
+                      img = document.createElement('img');
+                      img.src = companyNews[i].image
+                      img.alt = 'News Image'
+                      img.style.width = '80px'
+                      img.style.height = '80px'
+                      div.appendChild(img);
+                      outerdiv.appendChild(div);
+                      
+                      // Add the news title
+                      div = document.createElement('div');
+                      div.setAttribute('class', 'news-content');
+                      var h5 = document.createElement('h5');
+                      h5.setAttribute('class', 'news-title');
+                      h5.innerHTML = companyNews[i].headline;
+                      div.appendChild(h5);
+
+                      // Convert the Unix epoch time to human readable date
+                      let date = new Date(companyNews[i].datetime * 1000);
+                      options = { month: 'long'};
+                      date = date.getDate() + ' ' + Intl.DateTimeFormat('en-US', options).format(date) + ', ' + date.getFullYear()
+                      // Add the news date
+                      h5 = document.createElement('h5');
+                      h5.setAttribute('class', 'news-date');
+                      h5.innerHTML = date;
+                      div.appendChild(h5);
+
+                      // Add the news original post link
+                      h5 = document.createElement('h5');
+                      h5.setAttribute('class', 'news-link');
+                      var a = document.createElement('a');
+                      a.href = companyNews[i].url;
+                      a.target="_blank";
+                      a.innerHTML = "See Original Post";
+                      h5.appendChild(a);
+                      div.appendChild(h5);
+
+                      outerdiv.appendChild(div);
+                      newsElem.appendChild(outerdiv);
+                      newsNum += 1;
+                    }
+                    if (newsNum > 4) {
+                      break;
+                    }
+                  }
+                })
+                .catch(error => {
+                  console.log('Error: ' + error.message);
+                })
+            }
+          })
+          .catch(error => {
+            console.log('Error: ' + error.message);
+          })
+
+      }
+      function showResults(event, tabName) {
+        var i, tabcontent, tablinks;
+  
+        tabcontent = document.getElementsByClassName('tabcontent');
+        for (i = 0; i < tabcontent.length; i++) {
+          tabcontent[i].style.display = 'none';
+        }
+  
+        tablinks = document.getElementsByClassName('tablinks');
+        for (i = 0; i < tablinks.length; i++) {
+          tablinks[i].className = tablinks[i].className.replace(' active', '');
+        }
+          // Show the current tab, and add an "active" class to the button that opened the tab
+        document.getElementById(tabName).style.display = "block";
+        event.currentTarget.className += " active";
+      }
+      
+      function showCharts(stockPriceData, volumeData, ticker, startDate) {
+        // Create the chart
+        Highcharts.stockChart('chart-container', {
+
+          rangeSelector: {
+            selected: 0,
+            inputEnabled: false,
+            buttons: [{
+              type: 'day',
+              count: 7,
+              text: '7d'
+            }, {
+              type: 'day',
+              count: 15,
+              text: '15d'
+            },{
+              type: 'month',
+              count: 1,
+              text: '1m'
+            },{
+              type: 'month',
+              count: 3,
+              text: '3m'
+            },{
+              type: 'month',
+              count: 6,
+              text: '6m'
+            },
+            ]
+          },
+          title: {
+            text: 'Stock Price ' + ticker + ' ' + startDate
+          },
+          subtitle: {
+            text: '<a href="https://finnhub.io/" target=_blank>Source: Finnhub</a>',
+            useHTML: true,
+            y: 45
+          },
+          caption: {
+            text: 'Note: This data is static and taken from sample response give on https://finnhub.io/docs/api/stock-candles'
+          },
+          yAxis: [{
+            title: {
+              text: 'Stock Price'
+            },
+            opposite: false,
+            tickAmount: 6
+          }, {
+            title: {
+              text: 'Volume'
+            },
+            tickAmount: 6
+          }],
+          plotOptions: {
+            series: {
+                pointWidth: 5
+            }
+          },
+          series: [{
+            name: 'Stock Price',
+            data: stockPriceData,
+            yAxis: 0,
+            type: 'area',
+            threshold: null,
+            tooltip: {
+              valueDecimals: 2
+            },
+            fillColor: {
+              // 0 means top/left and 1 is bottom/right
+              // Start position (x1, y1): left, top
+              // End position (x2, y2): left, bottom
+              linearGradient: {
+                x1: 0,
+                y1: 0,
+                x2: 0,
+                y2: 1
+              },
+              stops: [
+                [0, Highcharts.getOptions().colors[0]],
+                [1, Highcharts.color(Highcharts.getOptions().colors[0]).setOpacity(0).get('rgba')]
+              ]
+            }
+          }, {
+            name: 'Volume',
+            data: volumeData,
+            yAxis: 1,
+            type: 'column'
+          }]
+        });
+        }
+    </script>
+  </head>
+  <body id="test">
+    <div id="search">
+      <div class="search-title"><p>Stock Search</p></div>
+      <div id="search-container">
+        <form onsubmit="fetchResults()" id="search-form">
+          <button class="search-button" type="submit"><img src="{{ url_for('static', filename='img/search-solid.svg') }}"></button>
+          <input placeholder="Enter Stock Ticker Symbol" size="30" id="ticker" required/>
+          <button class="clear-button" type="reset" onclick="clearContent()"><img src="{{ url_for('static', filename='img/times-solid.svg') }}"></button>
+        </form> 
+        <div id="error"></div>
+      </div>
+    </div>
+    <div id="result">
+      <div id="tab">
+        <button class="tablinks" onclick="showResults(event, 'Company')" id="defaultOpen">Company</button>
+        <button class="tablinks" onclick="showResults(event, 'StockSummary')">Stock Summary</button>
+        <button class="tablinks" onclick="showResults(event, 'Charts')">Charts</button>
+        <button class="tablinks" onclick="showResults(event, 'LatestNews')">Latest News</button>
+      </div>
+
+
+      <div id="content">
+        <div id="Company" class="tabcontent">
+        </div>
+        <div id="StockSummary" class="tabcontent">
+        </div>
+        <div id="Charts" class="tabcontent">
+          <div id="chart-container"></div>
+        </div>
+        <div id="LatestNews" class="tabcontent">
+        </div>
+      </div>
+    </div>
+    
+    <script language="JavaScript">
+      // Get the element with id="defaultOpen" and click on it
+      document.getElementById("defaultOpen").click();
+      document.getElementById("tab").hidden = true;
+      document.getElementById("defaultOpen").click();
+    </script>
+  </body>
+
+</html>
